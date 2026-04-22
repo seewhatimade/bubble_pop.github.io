@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Bubble Pop!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: linear-gradient(to bottom, #1a0533, #2d1b69, #1a3a5c, #0d4f6e);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas {
+    display: block;
+    width: 100%; height: 100%;
+    cursor: none;
+  }
+  #score {
+    position: fixed;
+    top: 16px; right: 24px;
+    font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+    font-size: 36px;
+    color: #fff;
+    text-shadow: 0 0 12px rgba(255,255,255,0.5);
+    pointer-events: none;
+    z-index: 10;
+  }
+  #title {
+    position: fixed;
+    top: 16px; left: 24px;
+    font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+    font-size: 36px;
+    color: #fff;
+    text-shadow: 0 0 12px rgba(255,255,255,0.5);
+    pointer-events: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="title">Bubble Pop!</div>
+<div id="score">0</div>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Web Audio for pop sounds ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playPop(pitch) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(pitch, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(pitch * 2.5, audioCtx.currentTime + 0.08);
+  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.15);
+}
+
+// --- Bubble colors ---
+const COLORS = [
+  { fill: 'rgba(255, 100, 150, 0.6)', stroke: 'rgba(255, 100, 150, 0.9)', pop: '#ff6496' },
+  { fill: 'rgba(100, 200, 255, 0.6)', stroke: 'rgba(100, 200, 255, 0.9)', pop: '#64c8ff' },
+  { fill: 'rgba(150, 255, 150, 0.6)', stroke: 'rgba(150, 255, 150, 0.9)', pop: '#96ff96' },
+  { fill: 'rgba(255, 220, 100, 0.6)', stroke: 'rgba(255, 220, 100, 0.9)', pop: '#ffdc64' },
+  { fill: 'rgba(220, 150, 255, 0.6)', stroke: 'rgba(220, 150, 255, 0.9)', pop: '#dc96ff' },
+  { fill: 'rgba(255, 170, 100, 0.6)', stroke: 'rgba(255, 170, 100, 0.9)', pop: '#ffaa64' },
+  { fill: 'rgba(100, 255, 220, 0.6)', stroke: 'rgba(100, 255, 220, 0.9)', pop: '#64ffdc' },
+  { fill: 'rgba(255, 130, 255, 0.6)', stroke: 'rgba(255, 130, 255, 0.9)', pop: '#ff82ff' },
+];
+
+// --- Mouse tracking ---
+let mouseX = -1000, mouseY = -1000;
+canvas.addEventListener('pointermove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
+// --- Pointy object drawing functions ---
+// All draw pointing RIGHT (tip at positive X). Rotation is applied externally.
+// Each returns a tipOffset: how far the tip extends from center on the X axis.
+
+const WEAPONS = [
+  { name: 'Kitchen Knife', tip: 28, draw() {
+    ctx.beginPath(); ctx.moveTo(0,-4); ctx.lineTo(24,-3); ctx.lineTo(28,0); ctx.lineTo(24,3); ctx.lineTo(0,4); ctx.closePath();
+    ctx.fillStyle='#d0d8e0'; ctx.fill(); ctx.strokeStyle='#a0a8b0'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3,-2); ctx.lineTo(22,-1.5); ctx.lineTo(22,0); ctx.lineTo(3,0); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fill();
+    ctx.beginPath(); ctx.roundRect(-3,-7,4,14,1); ctx.fillStyle='#c0a040'; ctx.fill(); ctx.strokeStyle='#a08030'; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-20,-5,18,10,3); ctx.fillStyle='#8B4513'; ctx.fill(); ctx.strokeStyle='#6B3010'; ctx.lineWidth=1.5; ctx.stroke();
+  }},
+  { name: 'Sword', tip: 36, draw() {
+    ctx.beginPath(); ctx.moveTo(0,-3); ctx.lineTo(34,-2); ctx.lineTo(36,0); ctx.lineTo(34,2); ctx.lineTo(0,3); ctx.closePath();
+    ctx.fillStyle='#c0c8d8'; ctx.fill(); ctx.strokeStyle='#8090a0'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4,-1); ctx.lineTo(30,-0.5); ctx.lineTo(30,0.5); ctx.lineTo(4,1); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fill();
+    ctx.beginPath(); ctx.roundRect(-4,-9,5,18,1); ctx.fillStyle='#d4af37'; ctx.fill(); ctx.strokeStyle='#b8960f'; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-18,-4,15,8,2); ctx.fillStyle='#5c3a1e'; ctx.fill(); ctx.strokeStyle='#3e2510'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-18,0,4,0,Math.PI*2); ctx.fillStyle='#d4af37'; ctx.fill();
+  }},
+  { name: 'Pencil', tip: 30, draw() {
+    ctx.beginPath(); ctx.roundRect(-18,-4,40,8,1); ctx.fillStyle='#f0c040'; ctx.fill(); ctx.strokeStyle='#d0a020'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(22,-4); ctx.lineTo(30,0); ctx.lineTo(22,4); ctx.closePath();
+    ctx.fillStyle='#f5deb3'; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(27,-1.5); ctx.lineTo(30,0); ctx.lineTo(27,1.5); ctx.closePath();
+    ctx.fillStyle='#333'; ctx.fill();
+    ctx.beginPath(); ctx.roundRect(-22,-5,6,10,2); ctx.fillStyle='#ff6b8a'; ctx.fill(); ctx.strokeStyle='#d0506a'; ctx.stroke();
+  }},
+  { name: 'Thumbtack', tip: 20, draw() {
+    ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(20,0); ctx.lineTo(0,2); ctx.closePath();
+    ctx.fillStyle='#c0c0c0'; ctx.fill(); ctx.strokeStyle='#909090'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-4,0,8,0,Math.PI*2); ctx.fillStyle='#e04050'; ctx.fill(); ctx.strokeStyle='#b03040'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-6,-3,2.5,0,Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fill();
+  }},
+  { name: 'Sewing Needle', tip: 32, draw() {
+    ctx.beginPath(); ctx.moveTo(-12,-1.5); ctx.lineTo(30,-0.5); ctx.lineTo(32,0); ctx.lineTo(30,0.5); ctx.lineTo(-12,1.5); ctx.closePath();
+    ctx.fillStyle='#d0d8e0'; ctx.fill(); ctx.strokeStyle='#a0a8b0'; ctx.lineWidth=0.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-8,0); ctx.lineTo(28,0); ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=0.8; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(-14,0,3,2,0,0,Math.PI*2); ctx.strokeStyle='#a0a8b0'; ctx.lineWidth=1.2; ctx.stroke();
+  }},
+  { name: 'Arrow', tip: 30, draw() {
+    ctx.beginPath(); ctx.roundRect(-20,-2,44,4,1); ctx.fillStyle='#8B6914'; ctx.fill(); ctx.strokeStyle='#6B4910'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(22,-6); ctx.lineTo(30,0); ctx.lineTo(22,6); ctx.closePath();
+    ctx.fillStyle='#808890'; ctx.fill(); ctx.strokeStyle='#606870'; ctx.stroke();
+    // Feathers
+    ctx.fillStyle='#e04040';
+    ctx.beginPath(); ctx.moveTo(-18,-2); ctx.lineTo(-24,-8); ctx.lineTo(-14,-2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-18,2); ctx.lineTo(-24,8); ctx.lineTo(-14,2); ctx.fill();
+  }},
+  { name: 'Dart', tip: 26, draw() {
+    ctx.beginPath(); ctx.moveTo(8,-3); ctx.lineTo(26,0); ctx.lineTo(8,3); ctx.closePath();
+    ctx.fillStyle='#c0c8d0'; ctx.fill(); ctx.strokeStyle='#909098'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-8,-4,18,8,3); ctx.fillStyle='#2060c0'; ctx.fill(); ctx.strokeStyle='#104090'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#1848a0';
+    ctx.beginPath(); ctx.moveTo(-8,-4); ctx.lineTo(-16,-10); ctx.lineTo(-4,-4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-8,4); ctx.lineTo(-16,10); ctx.lineTo(-4,4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-8,-1); ctx.lineTo(-16,-1); ctx.lineTo(-16,1); ctx.lineTo(-8,1); ctx.fill();
+  }},
+  { name: 'Scissors', tip: 28, draw() {
+    ctx.lineWidth=2; ctx.lineCap='round';
+    // Top blade
+    ctx.beginPath(); ctx.moveTo(-6,-4); ctx.lineTo(28,-1); ctx.strokeStyle='#b0b8c0'; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6,-4); ctx.lineTo(28,-1); ctx.lineTo(26,1); ctx.lineTo(-6,-2); ctx.closePath();
+    ctx.fillStyle='#d0d8e0'; ctx.fill();
+    // Bottom blade
+    ctx.beginPath(); ctx.moveTo(-6,4); ctx.lineTo(24,1); ctx.strokeStyle='#a0a8b0'; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6,4); ctx.lineTo(24,1); ctx.lineTo(22,-1); ctx.lineTo(-6,2); ctx.closePath();
+    ctx.fillStyle='#c0c8d0'; ctx.fill();
+    // Pivot
+    ctx.beginPath(); ctx.arc(-6,0,3,0,Math.PI*2); ctx.fillStyle='#808890'; ctx.fill();
+    // Handles
+    ctx.beginPath(); ctx.ellipse(-16,-6,7,5,0.3,0,Math.PI*2); ctx.strokeStyle='#e04050'; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(-16,6,7,5,-0.3,0,Math.PI*2); ctx.strokeStyle='#e04050'; ctx.lineWidth=2.5; ctx.stroke();
+  }},
+  { name: 'Toothpick', tip: 28, draw() {
+    ctx.beginPath(); ctx.moveTo(-20,-1.5); ctx.lineTo(26,-0.5); ctx.lineTo(28,0); ctx.lineTo(26,0.5); ctx.lineTo(-20,1.5); ctx.closePath();
+    ctx.fillStyle='#deb887'; ctx.fill(); ctx.strokeStyle='#c09860'; ctx.lineWidth=0.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-16,0); ctx.lineTo(24,0); ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=0.6; ctx.stroke();
+  }},
+  { name: 'Cactus Spike', tip: 26, draw() {
+    ctx.beginPath(); ctx.moveTo(-8,-5); ctx.lineTo(26,0); ctx.lineTo(-8,5); ctx.closePath();
+    ctx.fillStyle='#4a8c3f'; ctx.fill(); ctx.strokeStyle='#2d6b25'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-4,-3); ctx.lineTo(18,0); ctx.lineTo(-4,0); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
+    // Small side spikes
+    ctx.strokeStyle='#4a8c3f'; ctx.lineWidth=1.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(4,-2); ctx.lineTo(8,-8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10,2); ctx.lineTo(14,7); ctx.stroke();
+  }},
+  { name: 'Icicle', tip: 30, draw() {
+    ctx.beginPath(); ctx.moveTo(-10,-6); ctx.lineTo(30,0); ctx.lineTo(-10,6); ctx.closePath();
+    const ig=ctx.createLinearGradient(-10,0,30,0);
+    ig.addColorStop(0,'rgba(180,220,255,0.9)'); ig.addColorStop(1,'rgba(220,240,255,0.5)');
+    ctx.fillStyle=ig; ctx.fill(); ctx.strokeStyle='rgba(150,200,240,0.7)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6,-3); ctx.lineTo(22,0); ctx.lineTo(-6,0); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fill();
+  }},
+  { name: 'Unicorn Horn', tip: 30, draw() {
+    ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(30,0); ctx.lineTo(-6,6); ctx.closePath();
+    const ug=ctx.createLinearGradient(-6,0,30,0);
+    ug.addColorStop(0,'#f0d0f0'); ug.addColorStop(0.5,'#ffe0a0'); ug.addColorStop(1,'#fff8f0');
+    ctx.fillStyle=ug; ctx.fill(); ctx.strokeStyle='#d0a0d0'; ctx.lineWidth=1; ctx.stroke();
+    // Spiral lines
+    ctx.strokeStyle='rgba(200,150,200,0.5)'; ctx.lineWidth=1;
+    for(let i=0;i<5;i++){const t=i*6; ctx.beginPath(); ctx.moveTo(t,-5+i*1.2); ctx.lineTo(t+3,5-i*1.2); ctx.stroke();}
+    // Sparkle at tip
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(28,0,2,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(30,-3,1.2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(30,3,1.2,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+  }},
+  { name: 'Carrot', tip: 28, draw() {
+    ctx.beginPath(); ctx.moveTo(-8,-6); ctx.quadraticCurveTo(10,-4,28,0); ctx.quadraticCurveTo(10,4,-8,6); ctx.closePath();
+    const cg=ctx.createLinearGradient(-8,0,28,0);
+    cg.addColorStop(0,'#f08020'); cg.addColorStop(1,'#e06010');
+    ctx.fillStyle=cg; ctx.fill(); ctx.strokeStyle='#c05010'; ctx.lineWidth=1; ctx.stroke();
+    // Lines on carrot
+    ctx.strokeStyle='rgba(180,80,20,0.4)'; ctx.lineWidth=0.8;
+    for(let i=0;i<4;i++){const t=-2+i*7; ctx.beginPath(); ctx.moveTo(t,-4+i*0.8); ctx.lineTo(t,4-i*0.8); ctx.stroke();}
+    // Green top
+    ctx.fillStyle='#40a030';
+    ctx.beginPath(); ctx.moveTo(-8,-3); ctx.quadraticCurveTo(-18,-12,-10,-6); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-8,0); ctx.quadraticCurveTo(-22,-4,-12,-1); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-8,3); ctx.quadraticCurveTo(-18,12,-10,6); ctx.fill();
+  }},
+  { name: 'Rocket', tip: 32, draw() {
+    ctx.beginPath(); ctx.moveTo(32,0); ctx.quadraticCurveTo(24,-7,-4,-7); ctx.lineTo(-4,7); ctx.quadraticCurveTo(24,7,32,0); ctx.closePath();
+    const rg=ctx.createLinearGradient(-4,-7,-4,7);
+    rg.addColorStop(0,'#e04040'); rg.addColorStop(0.5,'#f06060'); rg.addColorStop(1,'#e04040');
+    ctx.fillStyle=rg; ctx.fill(); ctx.strokeStyle='#b03030'; ctx.lineWidth=1; ctx.stroke();
+    // Window
+    ctx.beginPath(); ctx.arc(14,0,4,0,Math.PI*2); ctx.fillStyle='#80c0f0'; ctx.fill(); ctx.strokeStyle='#5090c0'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(13,-1.5,1.5,0,Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fill();
+    // Fins
+    ctx.fillStyle='#c03030';
+    ctx.beginPath(); ctx.moveTo(-4,-7); ctx.lineTo(-12,-14); ctx.lineTo(-2,-7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-4,7); ctx.lineTo(-12,14); ctx.lineTo(-2,7); ctx.fill();
+    // Flame
+    ctx.fillStyle='#f0a020';
+    ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(-14,0); ctx.lineTo(-4,4); ctx.fill();
+    ctx.fillStyle='#f0e060';
+    ctx.beginPath(); ctx.moveTo(-4,-2); ctx.lineTo(-10,0); ctx.lineTo(-4,2); ctx.fill();
+  }},
+  { name: 'Lightning Bolt', tip: 28, draw() {
+    ctx.beginPath(); ctx.moveTo(28,0); ctx.lineTo(10,-4); ctx.lineTo(14,-3); ctx.lineTo(-4,-12);
+    ctx.lineTo(2,-2); ctx.lineTo(-2,-3); ctx.lineTo(28,0); ctx.closePath();
+    ctx.fillStyle='#ffe030'; ctx.fill(); ctx.strokeStyle='#d0b020'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(28,0); ctx.lineTo(10,4); ctx.lineTo(14,3); ctx.lineTo(-4,12);
+    ctx.lineTo(2,2); ctx.lineTo(-2,3); ctx.lineTo(28,0); ctx.closePath();
+    ctx.fillStyle='#ffe030'; ctx.fill(); ctx.strokeStyle='#d0b020'; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(20,0); ctx.lineTo(28,0); ctx.strokeStyle='#fff8a0'; ctx.lineWidth=2; ctx.stroke();
+  }},
+  { name: 'Drill Bit', tip: 30, draw() {
+    ctx.beginPath(); ctx.moveTo(12,-4); ctx.lineTo(30,0); ctx.lineTo(12,4); ctx.closePath();
+    ctx.fillStyle='#a0a8b0'; ctx.fill(); ctx.strokeStyle='#707880'; ctx.lineWidth=1; ctx.stroke();
+    // Spiral grooves
+    ctx.strokeStyle='#808890'; ctx.lineWidth=1.5;
+    for(let i=0;i<4;i++){const t=14+i*4; ctx.beginPath(); ctx.moveTo(t,-3.5+i*0.9); ctx.lineTo(t+2,3.5-i*0.9); ctx.stroke();}
+    // Body
+    ctx.beginPath(); ctx.roundRect(-16,-5,30,10,2); ctx.fillStyle='#606870'; ctx.fill(); ctx.strokeStyle='#404850'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-14,-3,10,6,1); ctx.fillStyle='#f0c020'; ctx.fill();
+  }},
+  { name: 'Nail', tip: 28, draw() {
+    ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(26,-0.8); ctx.lineTo(28,0); ctx.lineTo(26,0.8); ctx.lineTo(0,2); ctx.closePath();
+    ctx.fillStyle='#b0b8c0'; ctx.fill(); ctx.strokeStyle='#808890'; ctx.lineWidth=0.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2,-0.5); ctx.lineTo(24,0); ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.lineWidth=0.6; ctx.stroke();
+    // Flat head
+    ctx.beginPath(); ctx.roundRect(-6,-6,8,12,1); ctx.fillStyle='#a0a8b0'; ctx.fill(); ctx.strokeStyle='#707880'; ctx.lineWidth=1.5; ctx.stroke();
+  }},
+  { name: 'Rose Thorn', tip: 24, draw() {
+    ctx.beginPath(); ctx.moveTo(-6,-4); ctx.quadraticCurveTo(12,-3,24,0); ctx.quadraticCurveTo(12,3,-6,4); ctx.closePath();
+    ctx.fillStyle='#3a7030'; ctx.fill(); ctx.strokeStyle='#285020'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-2,-2); ctx.lineTo(18,0); ctx.lineTo(-2,0); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fill();
+    // Tiny rose
+    ctx.fillStyle='#e04060';
+    for(let a=0;a<5;a++){ctx.beginPath(); ctx.ellipse(-10+Math.cos(a*1.26)*4, Math.sin(a*1.26)*4, 3.5,2.5,a*1.26,0,Math.PI*2); ctx.fill();}
+    ctx.beginPath(); ctx.arc(-10,0,2.5,0,Math.PI*2); ctx.fillStyle='#c03050'; ctx.fill();
+  }},
+  { name: 'Fork', tip: 28, draw() {
+    // Prongs
+    ctx.strokeStyle='#c0c8d0'; ctx.lineWidth=2; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(10,-6); ctx.lineTo(28,-6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10,-2); ctx.lineTo(28,-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10,2); ctx.lineTo(28,2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10,6); ctx.lineTo(28,6); ctx.stroke();
+    // Connect prongs
+    ctx.beginPath(); ctx.roundRect(8,-8,4,16,1); ctx.fillStyle='#c0c8d0'; ctx.fill(); ctx.strokeStyle='#909098'; ctx.lineWidth=1; ctx.stroke();
+    // Handle
+    ctx.beginPath(); ctx.roundRect(-18,-3,28,6,2); ctx.fillStyle='#c0c8d0'; ctx.fill(); ctx.strokeStyle='#909098'; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-12,0); ctx.lineTo(6,0); ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1; ctx.stroke();
+  }},
+  { name: 'Magic Wand', tip: 30, draw() {
+    ctx.beginPath(); ctx.moveTo(-16,-2.5); ctx.lineTo(24,-1); ctx.lineTo(26,0); ctx.lineTo(24,1); ctx.lineTo(-16,2.5); ctx.closePath();
+    const wg=ctx.createLinearGradient(-16,0,26,0);
+    wg.addColorStop(0,'#1a1a2e'); wg.addColorStop(0.7,'#1a1a2e'); wg.addColorStop(0.7,'#f0f0f0'); wg.addColorStop(1,'#f0f0f0');
+    ctx.fillStyle=wg; ctx.fill(); ctx.strokeStyle='#333'; ctx.lineWidth=0.8; ctx.stroke();
+    // Star at tip
+    ctx.fillStyle='#ffe040';
+    const sx=30,sy=0,sr=5;
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      ctx.lineTo(sx+Math.cos((i*4*Math.PI/5)-Math.PI/2)*sr, sy+Math.sin((i*4*Math.PI/5)-Math.PI/2)*sr);
+      ctx.lineTo(sx+Math.cos((i*4*Math.PI/5+2*Math.PI/5)-Math.PI/2)*sr*0.4, sy+Math.sin((i*4*Math.PI/5+2*Math.PI/5)-Math.PI/2)*sr*0.4);
+    }
+    ctx.closePath(); ctx.fill(); ctx.strokeStyle='#d0b020'; ctx.lineWidth=0.8; ctx.stroke();
+    // Sparkles
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(28,-5,1.5,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(34,2,1,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(26,4,1.2,0,Math.PI*2); ctx.fill();
+  }},
+];
+
+let currentWeaponIndex = 0;
+let cursorAngle = 0; // angle the weapon points (toward nearest bubble)
+
+function drawWeapon(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(cursorAngle);
+  ctx.scale(1.4, 1.4); // make weapons a bit bigger for visibility
+  WEAPONS[currentWeaponIndex].draw();
+  ctx.restore();
+}
+
+// Show weapon name briefly after switching
+let weaponNameTimer = 0;
+let weaponNameText = WEAPONS[0].name;
+
+// --- Game state ---
+let bubbles = [];
+let particles = [];
+let score = 0;
+let spawnTimer = 0;
+const SCARE_DISTANCE = 150; // pixels — how close knife must be to scare a bubble
+
+class Bubble {
+  constructor() {
+    this.r = 30 + Math.random() * 40;
+    this.x = this.r + Math.random() * (W - this.r * 2);
+    this.y = H + this.r + Math.random() * 100;
+    this.speed = 0.5 + Math.random() * 1.2;
+    this.wobbleAmp = 0.3 + Math.random() * 0.7;
+    this.wobbleSpeed = 0.01 + Math.random() * 0.02;
+    this.wobbleOffset = Math.random() * Math.PI * 2;
+    this.time = 0;
+    this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    this.highlightAngle = Math.random() * Math.PI * 2;
+    this.alive = true;
+    this.scale = 0;
+    this.growing = true;
+  }
+
+  update() {
+    this.time++;
+    if (this.growing) {
+      this.scale = Math.min(1, this.scale + 0.05);
+      if (this.scale >= 1) this.growing = false;
+    }
+    this.y -= this.speed;
+    this.x += Math.sin(this.time * this.wobbleSpeed + this.wobbleOffset) * this.wobbleAmp;
+    if (this.y < -this.r * 2) this.alive = false;
+  }
+
+  draw() {
+    const r = this.r * this.scale;
+    if (r < 1) return;
+
+    // How scared is this bubble? (0 = happy, 1 = terrified)
+    const dx = mouseX - this.x;
+    const dy = mouseY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const fear = Math.max(0, 1 - dist / SCARE_DISTANCE);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    // Main bubble
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = this.color.fill;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = this.color.stroke;
+    ctx.stroke();
+
+    // Highlight/shine
+    const hx = Math.cos(this.highlightAngle) * r * 0.3;
+    const hy = Math.sin(this.highlightAngle) * r * 0.3 - r * 0.1;
+    const grad = ctx.createRadialGradient(hx, hy, r * 0.05, hx, hy, r * 0.45);
+    grad.addColorStop(0, 'rgba(255,255,255,0.7)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // --- Draw face ---
+    const faceScale = r / 50; // normalize face size
+    ctx.scale(faceScale, faceScale);
+
+    // Eyes
+    const eyeSpacing = 10;
+    const eyeY = -4;
+    const eyeSize = 5 + fear * 3; // eyes get bigger when scared
+    const pupilSize = 2.5 + fear * 1;
+
+    // Scared: eyes look toward the knife
+    const lookX = fear > 0.05 ? Math.sign(dx) * 1.5 * fear : 0;
+    const lookY = fear > 0.05 ? Math.sign(dy) * 1.5 * fear : 0;
+
+    // Left eye
+    ctx.beginPath();
+    ctx.ellipse(-eyeSpacing, eyeY, eyeSize * 0.8, eyeSize, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Left pupil
+    ctx.beginPath();
+    ctx.arc(-eyeSpacing + lookX, eyeY + lookY, pupilSize, 0, Math.PI * 2);
+    ctx.fillStyle = '#222';
+    ctx.fill();
+    // Left eye sparkle
+    ctx.beginPath();
+    ctx.arc(-eyeSpacing + lookX - 1, eyeY + lookY - 1.5, 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+
+    // Right eye
+    ctx.beginPath();
+    ctx.ellipse(eyeSpacing, eyeY, eyeSize * 0.8, eyeSize, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Right pupil
+    ctx.beginPath();
+    ctx.arc(eyeSpacing + lookX, eyeY + lookY, pupilSize, 0, Math.PI * 2);
+    ctx.fillStyle = '#222';
+    ctx.fill();
+    // Right eye sparkle
+    ctx.beginPath();
+    ctx.arc(eyeSpacing + lookX - 1, eyeY + lookY - 1.5, 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+
+    // Eyebrows when scared
+    if (fear > 0.15) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      const browLift = fear * 5;
+      // Left eyebrow — worried angle
+      ctx.beginPath();
+      ctx.moveTo(-eyeSpacing - 6, eyeY - 8 - browLift);
+      ctx.lineTo(-eyeSpacing + 2, eyeY - 11 - browLift);
+      ctx.stroke();
+      // Right eyebrow — worried angle
+      ctx.beginPath();
+      ctx.moveTo(eyeSpacing + 6, eyeY - 8 - browLift);
+      ctx.lineTo(eyeSpacing - 2, eyeY - 11 - browLift);
+      ctx.stroke();
+    }
+
+    // Cheeks (blush) — fade out when scared
+    const blush = 0.25 * (1 - fear);
+    if (blush > 0.02) {
+      ctx.fillStyle = `rgba(255, 150, 150, ${blush})`;
+      ctx.beginPath();
+      ctx.ellipse(-15, 6, 5, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(15, 6, 5, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Mouth
+    const mouthY = 10;
+    if (fear < 0.3) {
+      // Happy smile
+      ctx.beginPath();
+      ctx.arc(0, mouthY - 2, 7, 0.1 * Math.PI, 0.9 * Math.PI);
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    } else {
+      // Scared "O" mouth — bigger with more fear
+      const mouthOpen = 3 + fear * 6;
+      ctx.beginPath();
+      ctx.ellipse(0, mouthY + 2, mouthOpen * 0.7, mouthOpen, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  contains(px, py) {
+    const dx = px - this.x;
+    const dy = py - this.y;
+    return dx * dx + dy * dy <= (this.r * this.scale) * (this.r * this.scale);
+  }
+}
+
+class Particle {
+  constructor(x, y, color) {
+    this.x = x;
+    this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.r = 3 + Math.random() * 5;
+    this.color = color;
+    this.life = 1;
+    this.decay = 0.015 + Math.random() * 0.025;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.08; // gravity
+    this.vx *= 0.99;
+    this.life -= this.decay;
+  }
+
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.life;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r * this.life, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// --- Pop a bubble ---
+function popBubble(bubble) {
+  bubble.alive = false;
+  score++;
+  scoreEl.textContent = score;
+
+  // Spawn particles
+  const count = 12 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < count; i++) {
+    particles.push(new Particle(bubble.x, bubble.y, bubble.color.pop));
+  }
+
+  // Play pop sound — bigger bubbles = lower pitch
+  const pitch = 400 + (1 - bubble.r / 70) * 600;
+  playPop(pitch);
+
+  // Switch to next weapon
+  currentWeaponIndex = (currentWeaponIndex + 1) % WEAPONS.length;
+  weaponNameText = WEAPONS[currentWeaponIndex].name;
+  weaponNameTimer = 90; // show name for ~1.5 seconds
+}
+
+// Resume audio on first interaction
+canvas.addEventListener('pointerdown', () => {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+});
+
+// --- Spawn bubbles ---
+function spawnBubble() {
+  bubbles.push(new Bubble());
+}
+
+// Start with a few bubbles
+for (let i = 0; i < 5; i++) {
+  const b = new Bubble();
+  b.y = Math.random() * H;
+  bubbles.push(b);
+}
+
+// --- Main loop ---
+function update() {
+  // Spawn new bubbles
+  spawnTimer++;
+  const spawnRate = Math.max(20, 60 - score * 0.5); // gets busier as score goes up, min 20 frames
+  if (spawnTimer >= spawnRate) {
+    spawnTimer = 0;
+    spawnBubble();
+  }
+
+  // Update bubbles
+  bubbles.forEach(b => b.update());
+  bubbles = bubbles.filter(b => b.alive);
+
+  // Update particles
+  particles.forEach(p => p.update());
+  particles = particles.filter(p => p.life > 0);
+
+  // Weapon name display timer
+  if (weaponNameTimer > 0) weaponNameTimer--;
+
+  // --- Point weapon toward nearest bubble ---
+  let nearestDist = Infinity;
+  let nearestBubble = null;
+  for (const b of bubbles) {
+    const dx = b.x - mouseX;
+    const dy = b.y - mouseY;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestBubble = b;
+    }
+  }
+  if (nearestBubble) {
+    const targetAngle = Math.atan2(nearestBubble.y - mouseY, nearestBubble.x - mouseX);
+    // Smooth rotation
+    let diff = targetAngle - cursorAngle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    cursorAngle += diff * 0.15;
+  }
+
+  // --- Auto-pop: check if weapon tip touches any bubble ---
+  if (mouseX > -999) {
+    const tipDist = WEAPONS[currentWeaponIndex].tip * 1.4; // scaled
+    const tipX = mouseX + Math.cos(cursorAngle) * tipDist;
+    const tipY = mouseY + Math.sin(cursorAngle) * tipDist;
+    for (const b of bubbles) {
+      if (!b.alive) continue;
+      const dx = tipX - b.x;
+      const dy = tipY - b.y;
+      const r = b.r * b.scale;
+      if (dx * dx + dy * dy <= r * r) {
+        popBubble(b);
+        break; // one pop per frame
+      }
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw bubbles
+  bubbles.forEach(b => b.draw());
+
+  // Draw particles
+  particles.forEach(p => p.draw());
+
+  // Draw weapon cursor on top
+  if (mouseX > -999) drawWeapon(mouseX, mouseY);
+
+  // Show weapon name after switching
+  if (weaponNameTimer > 0) {
+    const alpha = weaponNameTimer < 20 ? weaponNameTimer / 20 : 1;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = "bold 28px 'Comic Sans MS', 'Chalkboard SE', cursive";
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 8;
+    ctx.fillText(weaponNameText, W / 2, H - 40);
+    ctx.restore();
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
