@@ -2,6 +2,8 @@
 
 Pop colorful bubbles with an arsenal of pointy weapons!
 
+https://seewhatimade.github.io/bubble_pop.github.io/
+
 ## How to Play
 
 1. **Move your mouse or finger** across the screen -- a pointy weapon follows your cursor.
